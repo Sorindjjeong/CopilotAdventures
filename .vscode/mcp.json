@@ -23,7 +23,7 @@
       {
          "type": "promptString",
          "id": "fireCrawlApiKey",
-         "description": "Firecrawl API Key",
+         "description": "fc-348851eba73d4b34a5deec4c02844786",
          "password": true
       }
    ]

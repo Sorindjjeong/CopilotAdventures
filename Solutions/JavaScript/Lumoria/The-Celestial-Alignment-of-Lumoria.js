@@ -22,31 +22,31 @@ function generateShadowAnimationSVG(planetList, frames = 10) {
     let svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${width}' height='${height}'>\n`;
     svg += `<circle cx='${sunX}' cy='${sunY}' r='40' fill='gold' />\n`;
     svg += `<text x='${sunX-20}' y='${sunY+60}' font-size='18'>Lumoria Sun</text>\n`;
+    // 각 프레임별 행성 위치 및 그림자 상태 계산
     planetList.forEach((p, i) => {
-      // 각도에 따라 행성 위치 변화
       const angle = (maxAngle * f / (frames-1)) + (i * 0.1);
       const px = sunX + planetGap * (i+1);
       const py = sunY + Math.sin(angle) * 60;
       const pr = Math.max(10, p.diameter/1500);
-      // 그림자 상태 계산
+      // 그림자 상태 계산 (정확도 개선)
       const sorted = [...planetList].sort((a, b) => a.distance - b.distance);
       const idx = sorted.findIndex(pp => pp.name === p.name);
       const closer = sorted.slice(0, idx);
-      const larger = closer.filter(pp => pp.diameter > p.diameter);
-      const smaller = closer.filter(pp => pp.diameter < p.diameter);
       let shadowType = 'None';
       let shadowColor = '#fff';
-      if (larger.length > 0) {
-        shadowType = 'Full';
-        shadowColor = '#222';
-        if (larger.length > 1) { shadowType = 'None (Multiple Shadows)'; shadowColor = '#444'; }
-      } else if (smaller.length > 0) {
-        shadowType = 'Partial';
-        shadowColor = '#888';
-      }
+      let shadowingPlanets = [];
+      closer.forEach(cp => {
+        const thetaCloser = 2 * Math.atan((cp.diameter/2)/(cp.distance*149597870));
+        const thetaPlanet = 2 * Math.atan((p.diameter/2)/(p.distance*149597870));
+        if (thetaCloser > thetaPlanet) shadowingPlanets.push(cp);
+      });
+      if (shadowingPlanets.length > 1) { shadowType = 'None (Multiple Shadows)'; shadowColor = '#444'; }
+      else if (shadowingPlanets.length === 1) { shadowType = 'Full'; shadowColor = '#222'; }
+      else if (closer.length > 0) { shadowType = 'Partial'; shadowColor = '#888'; }
       svg += `<circle cx='${px}' cy='${py}' r='${pr}' fill='#6cf' stroke='#333' stroke-width='2' />\n`;
       svg += `<ellipse cx='${px}' cy='${py+pr+5}' rx='${pr*0.8}' ry='${pr*0.4}' fill='${shadowColor}' opacity='0.7' />\n`;
       svg += `<text x='${px-20}' y='${py+pr+20}' font-size='16'>${p.name}</text>\n`;
+      svg += `<text x='${px-20}' y='${py+pr+38}' font-size='12' fill='#555'>${shadowType}</text>\n`;
     });
     svg += `<text x='${width-180}' y='${height-20}' font-size='14'>Frame ${f+1}/${frames}</text>\n`;
     svg += '</svg>';
@@ -123,12 +123,13 @@ function calculateLumoriaLight(planetList) {
     let shadowType = 'None';
     let shadowingPlanets = [];
     closer.forEach(cp => {
-      // 각도 0(완전 정렬) 가정, 단순 투영: closer 행성의 각도, 거리, 크기로 그림자 투영 여부
-      // 그림자 투영 공식: closer 행성의 각도 subtended > 관측행성의 각도 subtended
-      // θ = 2 * atan((diameter/2)/distance)
-      const thetaCloser = 2 * Math.atan((cp.diameter/2)/(cp.distance*149597870)); // AU->km
-      const thetaPlanet = 2 * Math.atan((planet.diameter/2)/(planet.distance*149597870));
-      if (thetaCloser > thetaPlanet) {
+      // 실제 천체 물리학 원리 기반: closer 행성의 그림자 투영 각도와 관측 행성의 각도 비교
+      // θ = 2 * atan((지름/2)/(거리*AU->km))
+      const AU_TO_KM = 149597870;
+      const thetaCloser = 2 * Math.atan((cp.diameter/2)/(cp.distance*AU_TO_KM));
+      const thetaPlanet = 2 * Math.atan((planet.diameter/2)/(planet.distance*AU_TO_KM));
+      // 그림자 투영: closer 행성의 각도가 관측 행성보다 크고, 거리 차이가 충분히 가까울 때
+      if (thetaCloser > thetaPlanet && Math.abs(cp.distance - planet.distance) < 1.0) {
         shadowingPlanets.push(cp);
       }
     });
@@ -143,12 +144,6 @@ function calculateLumoriaLight(planetList) {
       smallerCount: closer.filter(p => p.diameter < planet.diameter).length,
       shadowingPlanets: shadowingPlanets.map(p => p.name)
     };
-
-
-
-
-
-
   });
 }
 
@@ -197,22 +192,28 @@ function printCelestialResults(results) {
 }
 
 // Main execution
-try {
-  const results = calculateLumoriaLight(planets);
-  printCelestialResults(results);
-  // SVG 생성 및 출력
-  const svg = generateAlignmentSVG(planets);
-  require('fs').writeFileSync('lumoria-alignment.svg', svg);
-  console.log('🖼️ 행성 정렬 SVG가 lumoria-alignment.svg로 저장되었습니다.');
-  // 그림자 변화 애니메이션 SVG 프레임 생성 및 저장
-  const animSvgs = generateShadowAnimationSVG(planets, 10);
-  animSvgs.forEach((svgStr, idx) => {
-    require('fs').writeFileSync(`lumoria-shadow-frame${idx+1}.svg`, svgStr);
-  });
-  console.log('🎞️ 그림자 변화 애니메이션 SVG 프레임들이 lumoria-shadow-frame*.svg로 저장되었습니다.');
-} catch (err) {
-  console.error('🚨 Celestial misalignment detected:', err.message);
-}
+getUserPlanets(planets => {
+  try {
+    const results = calculateLumoriaLight(planets);
+    printCelestialResults(results);
+    // SVG 생성 및 출력
+    const svg = generateAlignmentSVG(planets);
+    require('fs').writeFileSync('lumoria-alignment.svg', svg);
+    console.log('🖼️ 행성 정렬 SVG가 lumoria-alignment.svg로 저장되었습니다.');
+    // 그림자 변화 애니메이션 SVG 프레임 생성 및 저장
+    const animSvgs = generateShadowAnimationSVG(planets, 10);
+    animSvgs.forEach((svgStr, idx) => {
+      require('fs').writeFileSync(`lumoria-shadow-frame${idx+1}.svg`, svgStr);
+    });
+    console.log('🎞️ 그림자 변화 애니메이션 SVG 프레임들이 lumoria-shadow-frame*.svg로 저장되었습니다.');
+    // 상세 보고서 생성 및 저장
+    const report = generateLumoriaReport(results);
+    require('fs').writeFileSync('lumoria-report.txt', report);
+    console.log('📄 천체 현상 상세 보고서가 lumoria-report.txt로 저장되었습니다.');
+  } catch (err) {
+    console.error('🚨 Celestial misalignment detected:', err.message);
+  }
+});
 
 
 /**
@@ -229,27 +230,22 @@ function generateAlignmentSVG(planetList) {
   // 태양
   svg += `<circle cx='${sunX}' cy='${sunY}' r='40' fill='gold' />\n`;
   svg += `<text x='${sunX-20}' y='${sunY+60}' font-size='18'>Lumoria Sun</text>\n`;
-
-  getUserPlanets(planets => {
-    try {
-      const results = calculateLumoriaLight(planets);
-      printCelestialResults(results);
-      // SVG 생성 및 출력
-      const svg = generateAlignmentSVG(planets);
-      require('fs').writeFileSync('lumoria-alignment.svg', svg);
-      console.log('🖼️ 행성 정렬 SVG가 lumoria-alignment.svg로 저장되었습니다.');
-      // 그림자 변화 애니메이션 SVG 프레임 생성 및 저장
-      const animSvgs = generateShadowAnimationSVG(planets, 10);
-      animSvgs.forEach((svgStr, idx) => {
-        require('fs').writeFileSync(`lumoria-shadow-frame${idx+1}.svg`, svgStr);
-      });
-      console.log('🎞️ 그림자 변화 애니메이션 SVG 프레임들이 lumoria-shadow-frame*.svg로 저장되었습니다.');
-      // 상세 보고서 생성 및 저장
-      const report = generateLumoriaReport(results);
-      require('fs').writeFileSync('lumoria-report.txt', report);
-      console.log('📄 천체 현상 상세 보고서가 lumoria-report.txt로 저장되었습니다.');
-    } catch (err) {
-      console.error('🚨 Celestial misalignment detected:', err.message);
-    }
+  // 행성 정렬 및 그림자 상태 표시
+  const results = calculateLumoriaLight(planetList);
+  results.forEach((p, i) => {
+    const px = sunX + planetGap * (i+1);
+    const py = sunY;
+    const pr = Math.max(10, p.diameter/1500);
+    let shadowColor = '#fff';
+    if (p.shadowType === 'Full') shadowColor = '#222';
+    else if (p.shadowType === 'Partial') shadowColor = '#888';
+    else if (p.shadowType === 'None (Multiple Shadows)') shadowColor = '#444';
+    svg += `<circle cx='${px}' cy='${py}' r='${pr}' fill='#6cf' stroke='#333' stroke-width='2' />\n`;
+    svg += `<ellipse cx='${px}' cy='${py+pr+5}' rx='${pr*0.8}' ry='${pr*0.4}' fill='${shadowColor}' opacity='0.7' />\n`;
+    svg += `<text x='${px-20}' y='${py+pr+20}' font-size='16'>${p.name}</text>\n`;
+    svg += `<text x='${px-20}' y='${py+pr+38}' font-size='12' fill='#555'>${p.shadowType}</text>\n`;
   });
+  svg += `<text x='${width-180}' y='${height-20}' font-size='14'>Lumoria Alignment</text>\n`;
+  svg += '</svg>';
+  return svg;
 }
